@@ -1,4 +1,13 @@
 __pycache__
+images/
+figures/
+outputs/
+sae_data_chunks/
+macenko_target/
+archive.zip
+*.pth
+sae_model_checkpoint.pth
+sae_test_data.pt
 *.ckpt
 downstream_dataloader.py
 test*
