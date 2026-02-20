@@ -1,0 +1,13 @@
+torch>=2.2.0
+torchvision>=0.17.0
+numpy>=1.26.0
+pandas
+Pillow>=10.0.0
+matplotlib
+seaborn
+scipy
+scikit-learn
+tqdm
+wandb
+torchstain>=1.3.0
+einops

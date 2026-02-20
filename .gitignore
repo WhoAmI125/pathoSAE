@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data (symlinked, don't track)
+data/activations
+
+# Models (heavy)
+models/backbone/*.ckpt
+models/checkpoints/
+
+# Results
+results/
+
+# Logs
+*.log
+wandb/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
