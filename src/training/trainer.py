@@ -70,15 +70,24 @@ class SAETrainer:
             json.dump(self.cfg.to_dict(), f, indent=2)
 
     def _save_checkpoint(self, path: Path, epoch: int) -> None:
-        checkpoint = {
-            "state_dict": self.sae.state_dict(),
-            "config": self.cfg,
-            "epoch": epoch,
-            "step": self.global_step,
-            "best_val_mse": self.best_val_mse,
-            "optimizer_state": self.optimizer.state_dict(),
-        }
-        torch.save(checkpoint, path)
+        # _activation_store holds live DataLoader workers which cannot be pickled.
+        # Temporarily detach it before serializing cfg.
+        saved_store = getattr(self.cfg, "_activation_store", None)
+        if saved_store is not None:
+            self.cfg._activation_store = None
+        try:
+            checkpoint = {
+                "state_dict": self.sae.state_dict(),
+                "config": self.cfg,
+                "epoch": epoch,
+                "step": self.global_step,
+                "best_val_mse": self.best_val_mse,
+                "optimizer_state": self.optimizer.state_dict(),
+            }
+            torch.save(checkpoint, path)
+        finally:
+            if saved_store is not None:
+                self.cfg._activation_store = saved_store
 
     def load_checkpoint(self, path: str) -> None:
         checkpoint = torch.load(path, map_location=self.device)

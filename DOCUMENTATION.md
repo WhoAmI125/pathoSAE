@@ -16,7 +16,7 @@ EXAONEPath 같은 병리 특화 Vision Transformer는 768차원 임베딩을 생
 기존 연구(CytoSAE, PLUTO-SAE)는 Vanilla SAE만 사용했고,
 "어떤 SAE 아키텍처가 임상 해석성에 최적인가?"는 아직 답이 없는 질문이다.
 
-PathoSAEv3는 이 질문에 답하기 위해 **4가지 SAE variant를 동일 조건에서 비교**한다.
+PathoSAEv3는 이 질문에 답하기 위해 **5가지 SAE variant를 동일 조건에서 비교**한다.
 
 ---
 
@@ -29,7 +29,7 @@ PathoSAEv3는 이 질문에 답하기 위해 **4가지 SAE variant를 동일 조
 ### 구체적 목표
 
 1. **공정 비교 (Fair Comparison)**
-   - Vanilla, Gated, TopK, JumpReLU를 동일 하이퍼파라미터로 학습
+   - Vanilla, Gated, TopK, JumpReLU, MSAE를 동일 하이퍼파라미터로 학습
    - 동일 데이터, 동일 epoch, 동일 lr, 동일 expansion factor
    - 차이점은 activation 함수와 sparsity 메커니즘뿐
 
@@ -66,15 +66,16 @@ PathoSAEv3는 이 질문에 답하기 위해 **4가지 SAE variant를 동일 조
 - DinoBloom-B(일반 의료) 대비 병리 도메인 특화
 - 196개 **spatial token** 사용 → CLS 단일 벡터 대비 공간적 해석 가능
 
-### 3.2 SAE 4가지 Variant
+### 3.2 SAE 5가지 Variant
 
 ```
 입력 x ∈ ℝ^768
     │
-    ├── [Vanilla]    ReLU(x·W + b)                    → L1 penalty
-    ├── [Gated]      ReLU(x·W + b) × Gate(x·W + b_g) → L1 penalty
-    ├── [TopK]       TopK(x·W + b, k=64)              → k가 sparsity 직접 제어
-    └── [JumpReLU]   x·W·H(x·W - θ)                   → L0 penalty (θ 학습)
+    ├── [Vanilla]    ReLU(x·W + b)                          → L1 penalty
+    ├── [Gated]      ReLU(x·W + b) × Gate(x·W + b_g)       → L1 penalty
+    ├── [TopK]       TopK(x·W + b, k=64)                    → k가 sparsity 직접 제어
+    ├── [JumpReLU]   x·W·H(x·W - θ)                         → L0 penalty (θ 학습)
+    └── [MSAE]       TopK(x·W+b, k=64/128/256/512) × 4level → 멀티스케일 weighted MSE
     │
     ▼
 잠재 표현 z ∈ ℝ^24,576 (sparse)
@@ -89,6 +90,7 @@ PathoSAEv3는 이 질문에 답하기 위해 **4가지 SAE variant를 동일 조
 | **Gated** | Gate × ReLU | L1 on gated acts | + b_gate | 이진 게이트로 선택적 활성화 |
 | **TopK** | TopK selection | k 직접 제어 | (추가 없음) | 정확한 sparsity, L1 불필요 |
 | **JumpReLU** | Heaviside step | L0 penalty (뉴런 수) | + log_threshold | 뉴런별 적응적 임계값 |
+| **MSAE** | Multi-scale TopK | nesting_list 직접 제어 | (추가 없음) | 계층적 feature 학습, Matryoshka |
 
 ### 3.3 선행 연구와의 차별점
 
@@ -96,7 +98,7 @@ PathoSAEv3는 이 질문에 답하기 위해 **4가지 SAE variant를 동일 조
 |---|---|---|---|
 | 도메인 | 혈액학 (단일 세포) | 병리 (조직) | **병리 (조직)** |
 | 백본 | DinoBloom-B (768d) | PLUTO (384d) | **EXAONEPath (768d)** |
-| SAE 종류 | Vanilla 1종 | Vanilla 1종 | **4종 비교 (핵심 기여)** |
+| SAE 종류 | Vanilla 1종 | Vanilla 1종 | **5종 비교 (핵심 기여)** |
 | 확장 배율 | 64x | 8x | **32x** |
 | 토큰 전략 | CLS only | CLS only | **196 spatial (14x14)** |
 | 추출 방식 | Online | - | **Offline (메모리 효율)** |
@@ -145,6 +147,7 @@ pathoSAEv3/
 │   │   ├── gated_sae.py              #   GatedSAE — b_gate + gated ReLU + L1
 │   │   ├── topk_sae.py               #   TopKSAE — TopK activation, L1 불필요
 │   │   ├── jumprelu_sae.py           #   JumpReLUSAE — learnable threshold + L0
+│   │   ├── msae.py                   #   MSAESAE — Matryoshka multi-scale TopK
 │   │   └── __init__.py               #   MODEL_REGISTRY + create_sae() factory
 │   │
 │   ├── training/                     # 학습 파이프라인
@@ -284,6 +287,34 @@ pathoSAEv3/
 | Gated | `ReLU(pre_act) * Gate` | `l1_coeff * L1` | `b_gate` |
 | TopK | `TopK(pre_act, k=64)` | 없음 (k가 제어) | 없음 |
 | JumpReLU | `pre_act * H(pre_act - θ)` | `l0_coeff * L0` | `log_threshold` |
+| MSAE | `TopK(pre_act, k) × 4 levels` | 없음 (각 k가 제어) | 없음 |
+
+### MSAE (Matryoshka SAE) 상세
+
+MSAE는 단일 encoder/decoder를 공유하되, **동일 pre-activation에 k값이 다른 TopK를 4번 적용**한다.
+각 level이 다른 granularity의 특징을 담당 — coarse(k=64)~fine(k=512).
+
+```
+pre_act = W_enc @ (x - b_dec) + b_enc        # 공유 encoder, shape: [B, 24576]
+    │
+    ├── TopK(k=64)  → recon₀ → MSE₀   (가장 sparse, 핵심 형태학적 패턴)
+    ├── TopK(k=128) → recon₁ → MSE₁
+    ├── TopK(k=256) → recon₂ → MSE₂
+    └── TopK(k=512) → recon₃ → MSE₃   (가장 dense, 세밀한 텍스처)
+
+loss = (w₀·MSE₀ + w₁·MSE₁ + w₂·MSE₂ + w₃·MSE₃) / Σwᵢ
+     UW (uniform):  w = [1, 1, 1, 1]
+     RW (reverse):  w = [4, 3, 2, 1]  (coarse feature 우선)
+```
+
+**장점**: 단일 모델이 다중 해석 granularity 제공. k=64로 보면 핵심 구조, k=512로 보면 세밀한 패턴.
+**pathoSAEv2 대비**: multi-level nesting 동일 구조이나, expansion=32로 통일 (v2는 16x 사용).
+
+MSAE 전용 CLI 옵션:
+```bash
+--msae_nesting 64,128,256,512   # nesting k 값 (쉼표 구분)
+--msae_importance uniform        # uniform | reverse
+```
 
 ---
 
@@ -303,7 +334,7 @@ pathoSAEv3/
 
 ### 논문용 출력물
 
-1. **Comparison Table** (`comparison_table.csv`) — 4 variant 지표 비교
+1. **Comparison Table** (`comparison_table.csv`) — 5 variant 지표 비교
 2. **Pareto Plot** (`mse_vs_l0.png`) — MSE vs L0 트레이드오프, Pareto front 표시
 3. **Activation Histogram** — variant별 activation 분포
 4. **Sparsity Distribution** — per-sample sparsity 분포

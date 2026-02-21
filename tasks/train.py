@@ -54,8 +54,21 @@ def parse_args() -> argparse.Namespace:
         "--model",
         type=str,
         required=True,
-        choices=["vanilla", "gated", "topk", "jumprelu"],
+        choices=["vanilla", "gated", "topk", "jumprelu", "msae"],
         help="SAE variant",
+    )
+    parser.add_argument(
+        "--msae_nesting",
+        type=str,
+        default="64,128,256,512",
+        help="MSAE nesting k values (comma-separated, e.g. '64,128,256,512')",
+    )
+    parser.add_argument(
+        "--msae_importance",
+        type=str,
+        default="uniform",
+        choices=["uniform", "reverse"],
+        help="MSAE level importance weighting: uniform or reverse",
     )
     parser.add_argument("--expansion_factor", type=int, default=32)
     parser.add_argument("--batch_size", type=int, default=4096)
@@ -69,6 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run_name", type=str, default="")
     parser.add_argument("--no_wandb", action="store_true")
     parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--num_workers", type=int, default=1, help="DataLoader workers per process")
     parser.add_argument(
         "--gpu",
         type=str,
@@ -95,6 +109,8 @@ def resolve_device(gpu_arg: str) -> str:
 def main() -> None:
     args = parse_args()
 
+    msae_nesting = [int(k) for k in args.msae_nesting.split(",")]
+
     cfg = SAEConfig(
         model_type=args.model,
         expansion_factor=args.expansion_factor,
@@ -108,6 +124,9 @@ def main() -> None:
         data_dir=args.data_dir,
         run_name=args.run_name,
         log_to_wandb=not args.no_wandb,
+        num_workers=args.num_workers,
+        msae_nesting_list=msae_nesting,
+        msae_importance=args.msae_importance,
     )
 
     set_seed(cfg.seed)

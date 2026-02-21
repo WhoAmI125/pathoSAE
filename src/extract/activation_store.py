@@ -124,8 +124,8 @@ class ActivationStore:
         counts: dict[Path, int] = {}
         for path in files:
             try:
-                data = torch.load(path, map_location="cpu", mmap=True)
-            except TypeError:
+                data = torch.load(str(path), map_location="cpu", mmap=True)
+            except (TypeError, ValueError):
                 data = torch.load(path, map_location="cpu")
 
             if "vectors" not in data:
@@ -193,20 +193,34 @@ class ActivationStore:
         if self._train_mean is not None:
             return self._train_mean
 
+        # 캐시 파일이 있으면 즉시 로드 (재계산 생략)
+        cache_path = self.data_dir / "train_mean.pt"
+        if cache_path.exists():
+            self._train_mean = torch.load(str(cache_path), map_location="cpu")
+            return self._train_mean
+
+        import gc
+
         running_sum = torch.zeros(self.cfg.input_dim, dtype=torch.float64)
         running_count = 0
 
-        for path in self.train_files:
+        for i, path in enumerate(self.train_files):
             data = torch.load(path, map_location="cpu")
             vectors = data["vectors"]
             flat = vectors.reshape(-1, self.cfg.input_dim).to(torch.float32)
             running_sum += flat.sum(dim=0, dtype=torch.float64)
             running_count += flat.shape[0]
+            # 명시적 메모리 해제
+            del flat, vectors, data
+            gc.collect()
+            if (i + 1) % 10 == 0:
+                print(f"  [{i+1}/{len(self.train_files)}] files processed", flush=True)
 
         if running_count == 0:
             raise RuntimeError("No training activations available to compute mean.")
 
         self._train_mean = (running_sum / running_count).to(torch.float32)
+        torch.save(self._train_mean, str(cache_path))
         return self._train_mean
 
     @property

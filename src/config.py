@@ -9,7 +9,7 @@ class SAEConfig:
     """논문용 통합 설정. 모든 variant가 이 Config 하나를 공유한다."""
 
     # === Model ===
-    model_type: str = "vanilla"  # {vanilla, gated, topk, jumprelu}
+    model_type: str = "vanilla"  # {vanilla, gated, topk, jumprelu, msae}
     input_dim: int = 768  # EXAONEPath ViT-B output dim
     expansion_factor: int = 32  # hidden_dim = input_dim * expansion_factor
     # derived: hidden_dim computed in __post_init__
@@ -35,8 +35,12 @@ class SAEConfig:
     jumprelu_init_threshold: float = 0.05
     jumprelu_bandwidth: float = 0.001
 
-    # === TopK (MSAE multi-level) ===
+    # === TopK ===
     topk_nesting_list: list = field(default_factory=lambda: [64])
+
+    # === MSAE (Matryoshka Multi-Scale SAE) ===
+    msae_nesting_list: list = field(default_factory=lambda: [64, 128, 256, 512])
+    msae_importance: str = "uniform"  # "uniform" | "reverse"
 
     # === Data ===
     data_dir: str = "data/activations"
