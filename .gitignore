@@ -17,6 +17,7 @@ models/checkpoints/
 results/
 
 # Logs
+logs/
 *.log
 wandb/
 
@@ -30,3 +31,8 @@ Thumbs.db
 
 # Env
 .env
+
+# Claude Code internals
+.claude/
+.pipeline/
+opus-codex-pipeline/
