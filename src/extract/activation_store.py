@@ -116,8 +116,10 @@ class ActivationStore:
 
         self._train_dataset: _ActivationBatchDataset | None = None
         self._val_dataset: _ActivationBatchDataset | None = None
+        self._full_dataset: _ActivationBatchDataset | None = None
         self._train_loader: DataLoader | None = None
         self._val_loader: DataLoader | None = None
+        self._full_loader: DataLoader | None = None
         self._train_mean: torch.Tensor | None = None
 
     def _scan_patch_counts(self, files: list[Path]) -> dict[Path, int]:
@@ -188,6 +190,42 @@ class ActivationStore:
         self._train_loader = DataLoader(self._train_dataset, **common_loader_kwargs)
         self._val_loader = DataLoader(self._val_dataset, **common_loader_kwargs)
         return self._train_loader, self._val_loader
+
+    def get_loader(self, split: str = "val") -> DataLoader:
+        """
+        Return a loader for one of {"train", "val", "full"}.
+
+        - train: train split files only
+        - val  : validation split files only
+        - full : all activation files
+        """
+        split = split.lower()
+        train_loader, val_loader = self.get_dataloaders()
+
+        if split == "train":
+            return train_loader
+        if split == "val":
+            return val_loader
+        if split != "full":
+            raise ValueError(f"Invalid split '{split}'. Expected one of: train, val, full")
+
+        if self._full_loader is None:
+            self._full_dataset = _ActivationBatchDataset(
+                files=self.files,
+                file_patch_counts=self.file_patch_counts,
+                input_dim=self.cfg.input_dim,
+                batch_size=self.cfg.batch_size,
+                shuffle=False,
+                seed=self.cfg.seed,
+            )
+            self._full_loader = DataLoader(
+                self._full_dataset,
+                batch_size=None,
+                num_workers=self.cfg.num_workers,
+                pin_memory=True,
+                persistent_workers=self.cfg.num_workers > 0,
+            )
+        return self._full_loader
 
     def compute_train_mean(self) -> torch.Tensor:
         if self._train_mean is not None:

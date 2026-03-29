@@ -291,6 +291,19 @@ class VisionTransformer(nn.Module):
 
 
 
+def vit_large(patch_size: int = 16, **kwargs: Any) -> VisionTransformer:
+    return VisionTransformer(
+        patch_size=patch_size,
+        embed_dim=1024,
+        depth=24,
+        num_heads=16,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+
+
 def vit_base(patch_size: int = 16, **kwargs: Any) -> VisionTransformer:
     return VisionTransformer(
         patch_size=patch_size,
@@ -363,3 +376,55 @@ class EXAONEPathViTEncoder:
                 break
 
         return x[:, 1:, :]
+
+
+class UNIViTEncoder:
+    """UNI ViT-L/16 encoder (timm-based) for spatial tokens from the last layer."""
+
+    def __init__(self, backbone_path: str, device: str = "cpu"):
+        import timm
+
+        backbone = Path(backbone_path)
+        if not backbone.exists():
+            raise FileNotFoundError(f"UNI checkpoint not found: {backbone}")
+
+        self.device = torch.device(device)
+        self.model = timm.create_model(
+            "vit_large_patch16_224",
+            img_size=224,
+            patch_size=16,
+            init_values=1e-5,
+            num_classes=0,
+            dynamic_img_size=True,
+        )
+        self.model.load_state_dict(
+            torch.load(str(backbone), map_location="cpu"),
+            strict=True,
+        )
+        self.model.to(self.device, dtype=torch.float32)
+        self.model.eval()
+
+    @torch.no_grad()
+    def extract_spatial_tokens(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Returns spatial patch tokens (excluding CLS) from the last layer.
+
+        Args:
+            images: [B, 3, 224, 224]
+
+        Returns:
+            [B, 196, 1024]
+        """
+        x = images.to(self.device, dtype=torch.float32, non_blocking=True)
+        features = self.model.forward_features(x)  # [B, 197, 1024]
+        return features[:, 1:, :]  # exclude CLS token
+
+
+def create_encoder(encoder_name: str, backbone_path: str, device: str = "cpu"):
+    """Factory function to create encoder by name."""
+    if encoder_name == "exaonepath":
+        return EXAONEPathViTEncoder(backbone_path=backbone_path, device=device)
+    elif encoder_name == "uni":
+        return UNIViTEncoder(backbone_path=backbone_path, device=device)
+    else:
+        raise ValueError(f"Unknown encoder: {encoder_name}. Choose from: exaonepath, uni")

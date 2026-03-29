@@ -11,11 +11,16 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from src.extract.macenko import MacenkoNormalizer
-from src.extract.vit_encoder import EXAONEPathViTEncoder
+from src.extract.vit_encoder import create_encoder
 
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
+
+ENCODER_DEFAULTS = {
+    "exaonepath": "models/backbone/EXAONEPath.ckpt",
+    "uni": "src/models/uni/pytorch_model.bin",
+}
 
 
 def find_free_gpu(min_free_mb: int = 20000) -> int:
@@ -67,8 +72,12 @@ class PathologyTileDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, str]:
         image_path = self.image_paths[idx]
 
-        with Image.open(image_path) as raw_image:
-            image = raw_image.convert("RGB")
+        try:
+            with Image.open(image_path) as raw_image:
+                image = raw_image.convert("RGB")
+        except Exception:
+            # Keep extraction running even if a few PNG files are corrupted.
+            image = Image.new("RGB", (224, 224), color=(0, 0, 0))
         try:
             normalized = self.normalizer(image)
             if not isinstance(normalized, torch.Tensor):
@@ -104,14 +113,21 @@ def collect_folders(image_dir: Path) -> list[tuple[Path, list[Path]]]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract EXAONEPath spatial activations")
+    parser = argparse.ArgumentParser(description="Extract spatial activations from pathology foundation models")
     parser.add_argument("--image_dir", type=str, required=True, help="Input image directory")
     parser.add_argument("--output_dir", type=str, default="data/activations", help="Output directory")
     parser.add_argument(
+        "--encoder",
+        type=str,
+        default="exaonepath",
+        choices=list(ENCODER_DEFAULTS.keys()),
+        help="Encoder model (default: exaonepath)",
+    )
+    parser.add_argument(
         "--backbone_path",
         type=str,
-        default="models/backbone/EXAONEPath.ckpt",
-        help="Backbone checkpoint path",
+        default=None,
+        help="Backbone checkpoint path (auto-resolved from --encoder if omitted)",
     )
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--num_workers", type=int, default=8, help="DataLoader workers")
@@ -122,6 +138,8 @@ def parse_args() -> argparse.Namespace:
         help="Optional target image for Macenko fitting",
     )
     parser.add_argument("--gpu", type=str, default="auto", help="GPU id or 'auto'")
+    parser.add_argument("--folder_start", type=int, default=None, help="Start folder index (inclusive, for multi-GPU split)")
+    parser.add_argument("--folder_end", type=int, default=None, help="End folder index (exclusive, for multi-GPU split)")
     return parser.parse_args()
 
 
@@ -137,13 +155,21 @@ def main() -> None:
 
     device = resolve_device(args.gpu)
     normalizer = MacenkoNormalizer(target_path=args.macenko_target)
-    encoder = EXAONEPathViTEncoder(backbone_path=args.backbone_path, device=device)
+
+    backbone_path = args.backbone_path or ENCODER_DEFAULTS[args.encoder]
+    encoder = create_encoder(encoder_name=args.encoder, backbone_path=backbone_path, device=device)
 
     folder_items = collect_folders(image_dir)
     if not folder_items:
         raise RuntimeError(f"No PNG images found under: {image_dir}")
 
-    for folder_idx, (folder_path, image_paths) in enumerate(folder_items):
+    total = len(folder_items)
+    start = args.folder_start if args.folder_start is not None else 0
+    end = args.folder_end if args.folder_end is not None else total
+    print(f"Processing folders [{start}:{end}] of {total} total")
+    folder_items = folder_items[start:end]
+
+    for folder_idx, (folder_path, image_paths) in enumerate(folder_items, start=start):
         dataset = PathologyTileDataset(image_paths=image_paths, normalizer=normalizer)
         loader = DataLoader(
             dataset,

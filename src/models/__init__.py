@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.config import SAEConfig
 from src.models.base_sae import BaseSAE
+from src.models.driftprior_sae import DriftPriorSAE
 from src.models.gated_sae import GatedSAE
 from src.models.jumprelu_sae import JumpReLUSAE
 from src.models.msae import MSAESAE
@@ -14,6 +15,7 @@ MODEL_REGISTRY = {
     "topk": TopKSAE,
     "jumprelu": JumpReLUSAE,
     "msae": MSAESAE,
+    "driftprior": DriftPriorSAE,
 }
 
 
@@ -32,6 +34,7 @@ __all__ = [
     "TopKSAE",
     "JumpReLUSAE",
     "MSAESAE",
+    "DriftPriorSAE",
     "MODEL_REGISTRY",
     "create_sae",
 ]

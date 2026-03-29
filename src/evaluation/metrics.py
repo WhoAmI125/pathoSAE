@@ -69,6 +69,7 @@ def compute_reconstruction_metrics(
     cosine_sum = 0.0
 
     active_mask = torch.zeros(model.hidden_dim, dtype=torch.bool, device=device_obj)
+    fire_count = torch.zeros(model.hidden_dim, dtype=torch.long, device=device_obj)
 
     activation_buffers: list[np.ndarray] = []
     sparsity_buffers: list[np.ndarray] = []
@@ -102,6 +103,7 @@ def compute_reconstruction_metrics(
         )
 
         active_mask |= nonzero_mask.any(dim=0)
+        fire_count += nonzero_mask.long().sum(dim=0)
 
         sample_sparsity = (1.0 - l0_per_sample / feature_acts.shape[1]).detach().cpu()
         sparsity_size = _sample_tensor_values(
@@ -136,6 +138,12 @@ def compute_reconstruction_metrics(
     total_neurons = int(model.hidden_dim)
     dead_neurons = total_neurons - active_neurons
 
+    # Frequency-based dead neuron counts (more meaningful than "never fired")
+    freq = fire_count.float() / float(sample_count)
+    dead_freq_1e4 = int((freq < 1e-4).sum().item())   # CytoSAE-style threshold
+    dead_freq_1e3 = int((freq < 1e-3).sum().item())
+    active_freq_1pct = int((freq >= 0.01).sum().item())
+
     metrics = {
         "model_type": model.cfg.model_type,
         "mse": float(mse),
@@ -146,6 +154,9 @@ def compute_reconstruction_metrics(
         "active_neurons": active_neurons,
         "dead_neurons": dead_neurons,
         "total_neurons": total_neurons,
+        "dead_freq_1e4": dead_freq_1e4,
+        "dead_freq_1e3": dead_freq_1e3,
+        "active_freq_1pct": active_freq_1pct,
     }
 
     activation_samples = (
@@ -176,6 +187,7 @@ def evaluate_checkpoint(
     data_dir: str | None = None,
     results_dir: str | None = None,
     device: str = "cpu",
+    split: str = "val",
     max_activation_samples: int = 500_000,
     max_sparsity_samples: int = 250_000,
 ) -> EvaluationArtifacts:
@@ -196,17 +208,18 @@ def evaluate_checkpoint(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     store = ActivationStore(cfg)
-    _, val_loader = store.get_dataloaders()
+    eval_loader = store.get_loader(split=split)
 
     artifacts = compute_reconstruction_metrics(
         model=model,
-        data_loader=val_loader,
+        data_loader=eval_loader,
         device=device,
         max_activation_samples=max_activation_samples,
         max_sparsity_samples=max_sparsity_samples,
         sample_seed=cfg.seed,
     )
     artifacts.output_dir = output_dir
+    artifacts.metrics["split"] = split
 
     save_metrics(artifacts.metrics, output_dir / "metrics.json")
     return artifacts

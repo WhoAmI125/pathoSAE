@@ -10,7 +10,8 @@ class SAEConfig:
 
     # === Model ===
     model_type: str = "vanilla"  # {vanilla, gated, topk, jumprelu, msae}
-    input_dim: int = 768  # EXAONEPath ViT-B output dim
+    encoder_name: str = "exaonepath"  # {exaonepath, uni}
+    input_dim: int = 768  # auto-set by encoder_name in __post_init__
     expansion_factor: int = 32  # hidden_dim = input_dim * expansion_factor
     # derived: hidden_dim computed in __post_init__
 
@@ -42,6 +43,16 @@ class SAEConfig:
     msae_nesting_list: list = field(default_factory=lambda: [64, 128, 256, 512])
     msae_importance: str = "uniform"  # "uniform" | "reverse"
 
+    # === DriftPrior-SAE ===
+    drift_phi_dim: int = 256  # frozen projection 출력 차원
+    drift_sub_batch: int = 512  # drift 계산용 sub-batch 크기
+    drift_n_pos: int = 512  # prior에서 샘플링할 positive 수
+    drift_tau: float = 0.1  # kernel temperature
+    drift_beta_start: float = 0.01  # β warmup 시작값
+    drift_beta_end: float = 0.1  # β warmup 종료값
+    drift_prior_sparsity: float = 0.95  # spike-and-slab sparsity (95% inactive)
+    drift_prior_scale: float = 1.0  # active 뉴런의 exponential scale
+
     # === Data ===
     data_dir: str = "data/activations"
     num_workers: int = 4
@@ -58,15 +69,32 @@ class SAEConfig:
     wandb_log_freq: int = 100
 
     # === Backbone ===
-    backbone_path: str = "models/backbone/EXAONEPath.ckpt"
+    backbone_path: str = "models/backbone/EXAONEPath.ckpt"  # auto-set by encoder_name
 
     # === Evaluation ===
     results_dir: str = "results"
 
+    # encoder presets: (input_dim, default_backbone_path)
+    ENCODER_PRESETS: dict = field(default_factory=dict, repr=False, init=False)
+
     def __post_init__(self):
+        self.ENCODER_PRESETS = {
+            "exaonepath": (768, "models/backbone/EXAONEPath.ckpt"),
+            "uni": (1024, "src/models/uni/pytorch_model.bin"),
+        }
+        if self.encoder_name in self.ENCODER_PRESETS:
+            preset_dim, preset_path = self.ENCODER_PRESETS[self.encoder_name]
+            # input_dim이 기본값(768)이면 encoder preset으로 덮어쓴다
+            if self.input_dim == 768 and preset_dim != 768:
+                self.input_dim = preset_dim
+            # backbone_path가 기본값이면 encoder preset으로 덮어쓴다
+            if self.backbone_path == "models/backbone/EXAONEPath.ckpt" and self.encoder_name != "exaonepath":
+                self.backbone_path = preset_path
+
         self.hidden_dim = self.input_dim * self.expansion_factor
         if not self.run_name:
-            self.run_name = f"{self.model_type}_e{self.expansion_factor}_ep{self.epochs}"
+            encoder_suffix = f"_{self.encoder_name}" if self.encoder_name != "exaonepath" else ""
+            self.run_name = f"{self.model_type}_e{self.expansion_factor}_ep{self.epochs}{encoder_suffix}"
 
     def to_dict(self) -> dict:
         return asdict(self) | {"hidden_dim": self.hidden_dim}

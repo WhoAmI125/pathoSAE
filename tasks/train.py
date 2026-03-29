@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         type=str,
         required=True,
-        choices=["vanilla", "gated", "topk", "jumprelu", "msae"],
+        choices=["vanilla", "gated", "topk", "jumprelu", "msae", "driftprior"],
         help="SAE variant",
     )
     parser.add_argument(
@@ -78,6 +78,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--l1_coeff", type=float, default=1e-4)
     parser.add_argument("--l0_coeff", type=float, default=1e-4)
     parser.add_argument("--topk_k", type=int, default=64)
+    # DriftPrior-SAE
+    parser.add_argument("--drift_phi_dim", type=int, default=256)
+    parser.add_argument("--drift_sub_batch", type=int, default=512)
+    parser.add_argument("--drift_n_pos", type=int, default=512)
+    parser.add_argument("--drift_tau", type=float, default=0.1)
+    parser.add_argument("--drift_beta_start", type=float, default=0.01)
+    parser.add_argument("--drift_beta_end", type=float, default=0.1)
+    parser.add_argument("--drift_prior_sparsity", type=float, default=0.95)
+    parser.add_argument("--drift_prior_scale", type=float, default=1.0)
+
+    parser.add_argument(
+        "--encoder",
+        type=str,
+        default="exaonepath",
+        choices=["exaonepath", "uni"],
+        help="Encoder used for activation extraction (sets input_dim automatically)",
+    )
     parser.add_argument("--data_dir", type=str, default="data/activations")
     parser.add_argument("--run_name", type=str, default="")
     parser.add_argument("--no_wandb", action="store_true")
@@ -113,6 +130,7 @@ def main() -> None:
 
     cfg = SAEConfig(
         model_type=args.model,
+        encoder_name=args.encoder,
         expansion_factor=args.expansion_factor,
         batch_size=args.batch_size,
         epochs=args.epochs,
@@ -127,6 +145,14 @@ def main() -> None:
         num_workers=args.num_workers,
         msae_nesting_list=msae_nesting,
         msae_importance=args.msae_importance,
+        drift_phi_dim=args.drift_phi_dim,
+        drift_sub_batch=args.drift_sub_batch,
+        drift_n_pos=args.drift_n_pos,
+        drift_tau=args.drift_tau,
+        drift_beta_start=args.drift_beta_start,
+        drift_beta_end=args.drift_beta_end,
+        drift_prior_sparsity=args.drift_prior_sparsity,
+        drift_prior_scale=args.drift_prior_scale,
     )
 
     set_seed(cfg.seed)

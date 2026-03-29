@@ -8,10 +8,15 @@ build/
 
 # Data (symlinked, don't track)
 data/activations
+data/activations_*/
+data/activations_uni/
+data/meta/group_meta_auto_vstatus_full.csv
 
 # Models (heavy)
 models/backbone/*.ckpt
 models/checkpoints/
+src/models/uni/
+src/models/uni/pytorch_model.bin
 
 # Results
 results/
@@ -36,3 +41,6 @@ Thumbs.db
 .claude/
 .pipeline/
 opus-codex-pipeline/
+
+# Local documentation binaries (heavy / non-source)
+extra_documentation/*.pdf

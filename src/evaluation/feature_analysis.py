@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import glob
 import json
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -8,12 +7,38 @@ from typing import Any, Iterable, Sequence
 import torch
 from tqdm import tqdm
 
+from src.extract.activation_store import ActivationStore
 from src.models.base_sae import BaseSAE
 
 
-def _resolve_activation_files(data_dir: str | Path) -> list[Path]:
-    pattern = str(Path(data_dir) / "spatial_folder_*.pt")
-    return [Path(p) for p in sorted(glob.glob(pattern))]
+def resolve_activation_files_for_split(
+    cfg,
+    split: str = "full",
+    max_files: int | None = None,
+) -> list[Path]:
+    split_norm = split.lower()
+    if split_norm not in {"train", "val", "full"}:
+        raise ValueError(f"Unsupported split '{split}'. Expected one of: train, val, full.")
+
+    store = ActivationStore(cfg)
+    if split_norm == "train":
+        files = list(store.train_files)
+    elif split_norm == "val":
+        files = list(store.val_files)
+    else:
+        files = list(store.train_files) + list(store.val_files)
+
+    if max_files is not None:
+        if max_files <= 0:
+            raise ValueError("max_files must be >= 1 when provided.")
+        files = files[:max_files]
+
+    if not files:
+        raise FileNotFoundError(
+            f"No activation files selected for split='{split_norm}' under '{cfg.data_dir}'."
+        )
+
+    return files
 
 
 def _get_path_list(payload: dict[str, Any]) -> list[str] | None:
@@ -24,7 +49,7 @@ def _get_path_list(payload: dict[str, Any]) -> list[str] | None:
     return None
 
 
-def _iter_activation_batches(
+def iter_activation_batches(
     files: Sequence[Path],
     input_dim: int,
     batch_size: int,
@@ -100,7 +125,7 @@ def analyze_features(
 
     n_samples = 0
 
-    iterator = _iter_activation_batches(
+    iterator = iter_activation_batches(
         files=activation_files,
         input_dim=model.input_dim,
         batch_size=batch_size,
@@ -214,6 +239,8 @@ def analyze_checkpoint_features(
     device: str = "cpu",
     top_k: int = 5,
     batch_size: int = 1024,
+    split: str = "full",
+    max_files: int | None = None,
 ) -> dict[str, Any]:
     checkpoint = Path(checkpoint_path)
     if not checkpoint.exists():
@@ -225,11 +252,7 @@ def analyze_checkpoint_features(
     if data_dir is not None:
         cfg.data_dir = data_dir
 
-    files = _resolve_activation_files(cfg.data_dir)
-    if not files:
-        raise FileNotFoundError(
-            f"No activation files found under '{cfg.data_dir}'. Expected pattern: spatial_folder_*.pt"
-        )
+    files = resolve_activation_files_for_split(cfg, split=split, max_files=max_files)
 
     result = analyze_features(
         model=model,
@@ -239,6 +262,8 @@ def analyze_checkpoint_features(
         batch_size=batch_size,
         show_progress=True,
     )
+    result["split"] = split
+    result["num_files"] = len(files)
 
     if output_path is None:
         run_name = cfg.run_name if cfg.run_name else checkpoint.parent.name
